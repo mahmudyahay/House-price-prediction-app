@@ -1,15 +1,16 @@
 
-import os
 import json
-import pickle
+import os
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
+from xgboost import XGBRegressor
+
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
@@ -20,17 +21,39 @@ st.set_page_config(
 
 
 # ============================================================
-# LOAD MODEL
+# FILE PATHS
 # ============================================================
 
-MODEL_PATH = "models/house_price_model.pkl"
+MODEL_PATH = "models/house_price_model.json"
+FEATURES_PATH = "models/feature_columns.json"
+METRICS_PATH = "results/metrics.json"
+DATA_PATH = "data/train.csv"
 
+
+# ============================================================
+# LOAD MODEL
+# ============================================================
 
 @st.cache_resource
 def load_model():
 
-    with open(MODEL_PATH, "rb") as file:
-        return pickle.load(file)
+    model = XGBRegressor()
+
+    model.load_model(MODEL_PATH)
+
+    return model
+
+
+# ============================================================
+# LOAD FEATURE COLUMNS
+# ============================================================
+
+@st.cache_data
+def load_feature_columns():
+
+    with open(FEATURES_PATH, "r") as file:
+
+        return json.load(file)
 
 
 # ============================================================
@@ -40,14 +63,13 @@ def load_model():
 @st.cache_data
 def load_metrics():
 
-    metrics_path = "results/metrics.json"
+    if not os.path.exists(METRICS_PATH):
 
-    if os.path.exists(metrics_path):
+        return None
 
-        with open(metrics_path, "r") as file:
-            return json.load(file)
+    with open(METRICS_PATH, "r") as file:
 
-    return None
+        return json.load(file)
 
 
 # ============================================================
@@ -57,32 +79,81 @@ def load_metrics():
 @st.cache_data
 def load_data():
 
-    return pd.read_csv("data/train.csv")
+    return pd.read_csv(DATA_PATH)
 
 
 # ============================================================
-# LOAD EVERYTHING
+# FEATURE ENGINEERING
 # ============================================================
 
-try:
+def create_features(data):
 
-    model = load_model()
+    df = data.copy()
 
-except Exception as e:
+    current_year = 2026
 
-    st.error(f"Model loading failed: {e}")
-    st.stop()
+    df["HouseAge"] = (
+        current_year - df["YearBuilt"]
+    )
 
+    df["TotalPorchSF"] = (
+        df["OpenPorchSF"]
+        + df["3SsnPorch"]
+        + df["EnclosedPorch"]
+        + df["ScreenPorch"]
+        + df["WoodDeckSF"]
+    )
 
-metrics = load_metrics()
-df = load_data()
+    df["TotalSF"] = (
+        df["GrLivArea"]
+        + df["TotalBsmtSF"]
+    )
+
+    df["YearsSinceRemodel"] = (
+        df["YearRemodAdd"]
+        - df["YearBuilt"]
+    )
+
+    df["IsRemodeled"] = (
+        df["YearRemodAdd"]
+        != df["YearBuilt"]
+    ).astype(int)
+
+    df["HasGarage"] = (
+        df["GarageArea"] > 0
+    ).astype(int)
+
+    df["HasFireplace"] = (
+        df["Fireplaces"] > 0
+    ).astype(int)
+
+    df["HasPool"] = (
+        df["PoolArea"] > 0
+    ).astype(int)
+
+    df["HasBasement"] = (
+        df["TotalBsmtSF"] > 0
+    ).astype(int)
+
+    df["TotalBathrooms"] = (
+        df["FullBath"]
+        + 0.5 * df["HalfBath"]
+    )
+
+    df["GarageSpacePerCar"] = np.where(
+        df["GarageCars"] > 0,
+        df["GarageArea"] / df["GarageCars"],
+        0
+    )
+
+    return df
 
 
 # ============================================================
-# PREPARE PREDICTION INPUT
+# PREPARE INPUT
 # ============================================================
 
-def prepare_prediction_input(
+def prepare_input(
     overall_qual,
     gr_liv_area,
     year_built,
@@ -96,24 +167,12 @@ def prepare_prediction_input(
     exter_qual
 ):
 
-    # --------------------------------------------------------
-    # Use the same reference year used during training
-    # --------------------------------------------------------
-
-    current_year = df["YearBuilt"].max()
-
-
-    # --------------------------------------------------------
-    # BASIC FEATURES
-    # --------------------------------------------------------
-
     data = {
 
         "MSSubClass": 20,
         "MSZoning": "RL",
         "LotFrontage": 70,
         "LotArea": 8000,
-
         "Street": "Pave",
         "Alley": "None",
         "LotShape": "Reg",
@@ -149,31 +208,36 @@ def prepare_prediction_input(
 
         "Foundation": "PConc",
 
-
-        # ----------------------------------------------------
-        # BASEMENT
-        # ----------------------------------------------------
-
         "BsmtQual": (
-            "TA" if total_bsmt_sf > 0 else "None"
+            "TA"
+            if total_bsmt_sf > 0
+            else "None"
         ),
 
         "BsmtCond": (
-            "TA" if total_bsmt_sf > 0 else "None"
+            "TA"
+            if total_bsmt_sf > 0
+            else "None"
         ),
 
         "BsmtExposure": (
-            "No" if total_bsmt_sf > 0 else "None"
+            "No"
+            if total_bsmt_sf > 0
+            else "None"
         ),
 
         "BsmtFinType1": (
-            "GLQ" if total_bsmt_sf > 0 else "None"
+            "GLQ"
+            if total_bsmt_sf > 0
+            else "None"
         ),
 
         "BsmtFinSF1": total_bsmt_sf * 0.6,
 
         "BsmtFinType2": (
-            "Unf" if total_bsmt_sf > 0 else "None"
+            "Unf"
+            if total_bsmt_sf > 0
+            else "None"
         ),
 
         "BsmtFinSF2": 0,
@@ -183,15 +247,12 @@ def prepare_prediction_input(
         "TotalBsmtSF": total_bsmt_sf,
 
         "BsmtFullBath": (
-            1 if total_bsmt_sf > 0 else 0
+            1
+            if total_bsmt_sf > 1000
+            else 0
         ),
 
         "BsmtHalfBath": 0,
-
-
-        # ----------------------------------------------------
-        # LIVING AREA
-        # ----------------------------------------------------
 
         "1stFlrSF": gr_liv_area * 0.6,
 
@@ -219,21 +280,22 @@ def prepare_prediction_input(
 
         "FireplaceQu": "Gd",
 
-
-        # ----------------------------------------------------
-        # GARAGE
-        # ----------------------------------------------------
-
         "GarageType": (
-            "Attchd" if garage_cars > 0 else "None"
+            "Attchd"
+            if garage_cars > 0
+            else "None"
         ),
 
         "GarageYrBlt": (
-            year_built if garage_cars > 0 else 0
+            year_built
+            if garage_cars > 0
+            else 0
         ),
 
         "GarageFinish": (
-            "Unf" if garage_cars > 0 else "None"
+            "Unf"
+            if garage_cars > 0
+            else "None"
         ),
 
         "GarageCars": garage_cars,
@@ -241,160 +303,91 @@ def prepare_prediction_input(
         "GarageArea": garage_area,
 
         "GarageQual": (
-            "TA" if garage_cars > 0 else "None"
+            "TA"
+            if garage_cars > 0
+            else "None"
         ),
 
         "GarageCond": (
-            "TA" if garage_cars > 0 else "None"
+            "TA"
+            if garage_cars > 0
+            else "None"
         ),
-
-
-        # ----------------------------------------------------
-        # OUTDOOR FEATURES
-        # ----------------------------------------------------
 
         "PavedDrive": "Y",
 
         "WoodDeckSF": 0,
-
         "OpenPorchSF": 50,
-
         "EnclosedPorch": 0,
-
         "3SsnPorch": 0,
-
         "ScreenPorch": 0,
 
-
-        # ----------------------------------------------------
-        # POOL / MISC
-        # ----------------------------------------------------
-
         "PoolArea": 0,
-
         "PoolQC": "None",
 
         "Fence": "None",
-
         "MiscFeature": "None",
-
         "MiscVal": 0,
 
-
-        # ----------------------------------------------------
-        # SALE INFORMATION
-        # ----------------------------------------------------
-
         "MoSold": 6,
-
-        "YrSold": 2010,
+        "YrSold": 2026,
 
         "SaleType": "WD",
-
         "SaleCondition": "Normal",
 
         "Heating": "GasA",
-
         "HeatingQC": "Ex",
-
         "CentralAir": "Y",
-
         "Electrical": "SBrkr"
     }
 
+    df = pd.DataFrame([data])
 
-    # ========================================================
-    # FEATURE ENGINEERING
-    # ========================================================
+    df = create_features(df)
 
-    data["HouseAge"] = (
-        current_year - data["YearBuilt"]
+    return df
+
+
+# ============================================================
+# PREPARE DATA FOR XGBOOST
+# ============================================================
+
+def prepare_for_model(df, feature_columns):
+
+    df = pd.get_dummies(
+        df,
+        dtype=int
     )
 
-
-    data["TotalPorchSF"] = (
-
-        data["OpenPorchSF"]
-        + data["3SsnPorch"]
-        + data["EnclosedPorch"]
-        + data["ScreenPorch"]
-        + data["WoodDeckSF"]
-
+    df = df.reindex(
+        columns=feature_columns,
+        fill_value=0
     )
 
+    return df
 
-    data["TotalSF"] = (
 
-        data["GrLivArea"]
-        + data["TotalBsmtSF"]
+# ============================================================
+# LOAD EVERYTHING
+# ============================================================
 
+try:
+
+    model = load_model()
+
+    feature_columns = load_feature_columns()
+
+    metrics = load_metrics()
+
+    df = load_data()
+
+except Exception as e:
+
+    st.error(
+        f"Application loading failed: {e}"
     )
 
-
-    data["YearsSinceRemodel"] = (
-
-        data["YearRemodAdd"]
-        - data["YearBuilt"]
-
-    )
-
-
-    data["IsRemodeled"] = int(
-
-        data["YearRemodAdd"]
-        != data["YearBuilt"]
-
-    )
-
-
-    data["HasGarage"] = int(
-
-        data["GarageArea"] > 0
-
-    )
-
-
-    data["HasFireplace"] = int(
-
-        data["Fireplaces"] > 0
-
-    )
-
-
-    data["HasPool"] = int(
-
-        data["PoolArea"] > 0
-
-    )
-
-
-    data["HasBasement"] = int(
-
-        data["TotalBsmtSF"] > 0
-
-    )
-
-
-    data["TotalBathrooms"] = (
-
-        data["FullBath"]
-        + 0.5 * data["HalfBath"]
-
-    )
-
-
-    data["GarageSpacePerCar"] = (
-
-        data["GarageArea"] / data["GarageCars"]
-
-        if data["GarageCars"] > 0
-
-        else 0
-
-    )
-
-
-    return pd.DataFrame([data])
+    st.stop()
 
 
 # ============================================================
@@ -421,7 +414,9 @@ page = st.sidebar.radio(
 
 if page == "Home":
 
-    st.title("🏠 House Price Prediction System")
+    st.title(
+        "🏠 House Price Prediction System"
+    )
 
     st.subheader(
         "Machine Learning Regression Project"
@@ -429,17 +424,14 @@ if page == "Home":
 
     st.write(
         """
-        This application predicts house sale prices
-        using machine learning techniques trained on
-        the Ames Housing dataset.
+        Predict house prices using a machine learning
+        model trained on the Ames Housing dataset.
         """
     )
 
     st.divider()
 
-
     col1, col2, col3 = st.columns(3)
-
 
     with col1:
 
@@ -448,14 +440,12 @@ if page == "Home":
             f"{df.shape[0]:,}"
         )
 
-
     with col2:
 
         st.metric(
             "Features",
-            f"{df.shape[1]:,}"
+            f"{len(feature_columns):,}"
         )
-
 
     with col3:
 
@@ -465,7 +455,6 @@ if page == "Home":
                 "Test R²",
                 f"{metrics['testing_r2']:.3f}"
             )
-
 
     st.divider()
 
@@ -483,27 +472,22 @@ if page == "Home":
 
         **3. Feature Engineering**
 
-        New features such as TotalSF,
-        HouseAge and TotalBathrooms are created.
+        Features such as TotalSF, HouseAge,
+        TotalBathrooms and others are created.
 
-        **4. Preprocessing**
+        **4. Encoding**
 
-        Numerical features are scaled and
-        categorical features are one-hot encoded.
+        Categorical variables are converted into
+        numerical variables.
 
-        **5. Machine Learning**
+        **5. XGBoost**
 
-        Several regression models are trained
-        and compared.
+        The trained XGBoost model predicts the
+        house price.
 
-        **6. Model Selection**
+        **6. Deployment**
 
-        XGBoost is tuned using cross-validation.
-
-        **7. Deployment**
-
-        The final model is saved and served
-        through Streamlit.
+        The model is deployed using Streamlit.
         """
     )
 
@@ -517,85 +501,74 @@ elif page == "Predict Price":
     st.title("🔮 Predict House Price")
 
     st.write(
-        "Enter the characteristics of the house below."
+        "Enter the characteristics of the house."
     )
 
     st.divider()
 
-
     col1, col2 = st.columns(2)
-
 
     with col1:
 
         overall_qual = st.slider(
             "Overall Quality",
-            min_value=1,
-            max_value=10,
-            value=5
+            1,
+            10,
+            5
         )
-
 
         gr_liv_area = st.number_input(
             "Above Ground Living Area (sq ft)",
-            min_value=100,
-            max_value=10000,
-            value=1500
+            100,
+            10000,
+            1500
         )
-
 
         year_built = st.number_input(
             "Year Built",
-            min_value=1800,
-            max_value=int(df["YearBuilt"].max()),
-            value=2000
+            1800,
+            2026,
+            2000
         )
-
 
         total_bsmt_sf = st.number_input(
             "Total Basement Area (sq ft)",
-            min_value=0,
-            max_value=5000,
-            value=1000
+            0,
+            5000,
+            1000
         )
-
 
     with col2:
 
         garage_cars = st.number_input(
             "Garage Capacity",
-            min_value=0,
-            max_value=5,
-            value=2
+            0,
+            5,
+            2
         )
-
 
         garage_area = st.number_input(
             "Garage Area (sq ft)",
-            min_value=0,
-            max_value=2000,
-            value=400
+            0,
+            2000,
+            400
         )
-
 
         full_bath = st.number_input(
             "Full Bathrooms",
-            min_value=0,
-            max_value=5,
-            value=2
+            0,
+            5,
+            2
         )
-
 
         half_bath = st.number_input(
             "Half Bathrooms",
-            min_value=0,
-            max_value=3,
-            value=1
+            0,
+            3,
+            1
         )
 
-
     st.divider()
-
 
     neighborhood = st.selectbox(
         "Neighborhood",
@@ -606,7 +579,6 @@ elif page == "Predict Price":
         )
     )
 
-
     kitchen_qual = st.selectbox(
         "Kitchen Quality",
         sorted(
@@ -615,7 +587,6 @@ elif page == "Predict Price":
             .unique()
         )
     )
-
 
     exter_qual = st.selectbox(
         "Exterior Quality",
@@ -626,65 +597,46 @@ elif page == "Predict Price":
         )
     )
 
-
     st.divider()
 
-
-    predict_button = st.button(
+    if st.button(
         "🏠 Predict House Price",
         type="primary"
-    )
+    ):
 
-
-    if predict_button:
-
-        input_df = prepare_prediction_input(
-
-            overall_qual=overall_qual,
-
-            gr_liv_area=gr_liv_area,
-
-            year_built=year_built,
-
-            total_bsmt_sf=total_bsmt_sf,
-
-            garage_cars=garage_cars,
-
-            garage_area=garage_area,
-
-            full_bath=full_bath,
-
-            half_bath=half_bath,
-
-            neighborhood=neighborhood,
-
-            kitchen_qual=kitchen_qual,
-
-            exter_qual=exter_qual
+        input_df = prepare_input(
+            overall_qual,
+            gr_liv_area,
+            year_built,
+            total_bsmt_sf,
+            garage_cars,
+            garage_area,
+            full_bath,
+            half_bath,
+            neighborhood,
+            kitchen_qual,
+            exter_qual
         )
 
+        model_input = prepare_for_model(
+            input_df,
+            feature_columns
+        )
 
         try:
 
-            # Model predicts LogSalePrice
-
             log_prediction = model.predict(
-                input_df
+                model_input
             )[0]
-
-
-            # Convert back to original price
 
             predicted_price = np.expm1(
                 log_prediction
             )
 
-
             st.success(
                 f"### Estimated House Price: "
                 f"${predicted_price:,.2f}"
             )
-
 
             st.info(
                 """
@@ -693,7 +645,6 @@ elif page == "Predict Price":
                 training dataset.
                 """
             )
-
 
         except Exception as e:
 
@@ -710,11 +661,9 @@ elif page == "Model Performance":
 
     st.title("📊 Model Performance")
 
-
     if metrics:
 
         col1, col2, col3 = st.columns(3)
-
 
         with col1:
 
@@ -723,14 +672,12 @@ elif page == "Model Performance":
                 f"{metrics['testing_r2']:.4f}"
             )
 
-
         with col2:
 
             st.metric(
                 "Testing MAE",
                 f"{metrics['testing_mae']:.4f}"
             )
-
 
         with col3:
 
@@ -739,17 +686,14 @@ elif page == "Model Performance":
                 f"{metrics['testing_rmse']:.4f}"
             )
 
-
         st.divider()
 
-
-        st.subheader("Training vs Testing")
-
+        st.subheader(
+            "Training vs Testing"
+        )
 
         performance_df = pd.DataFrame(
-
             {
-
                 "Metric": [
                     "R²",
                     "MAE",
@@ -757,49 +701,40 @@ elif page == "Model Performance":
                 ],
 
                 "Training": [
-
                     metrics["training_r2"],
                     metrics["training_mae"],
                     metrics["training_rmse"]
-
                 ],
 
                 "Testing": [
-
                     metrics["testing_r2"],
                     metrics["testing_mae"],
                     metrics["testing_rmse"]
-
                 ]
             }
         )
-
 
         st.dataframe(
             performance_df,
             use_container_width=True
         )
 
-
-        st.subheader("Cross-Validation")
-
-
-        st.write(
-            f"""
-            Mean cross-validation R²:
-
-            **{metrics['cross_validation_r2_mean']:.4f}**
-            """
+        st.subheader(
+            "Cross-Validation"
         )
 
+        st.metric(
+            "Mean CV R²",
+            f"{metrics['cross_validation_r2_mean']:.4f}"
+        )
 
-        st.subheader("Best XGBoost Parameters")
-
+        st.subheader(
+            "Best XGBoost Parameters"
+        )
 
         st.json(
             metrics["best_parameters"]
         )
-
 
     else:
 
@@ -816,7 +751,6 @@ elif page == "Explore Data":
 
     st.title("📈 Explore the Dataset")
 
-
     st.write(
         f"""
         The dataset contains
@@ -826,53 +760,49 @@ elif page == "Explore Data":
         """
     )
 
-
-    st.subheader("First 10 rows")
-
+    st.subheader("First 10 Rows")
 
     st.dataframe(
         df.head(10),
         use_container_width=True
     )
 
-
     st.subheader("Dataset Statistics")
-
 
     st.dataframe(
         df.describe(),
         use_container_width=True
     )
 
-
     st.subheader("Missing Values")
 
-
     missing = (
-
         df.isnull()
         .sum()
-        .sort_values(ascending=False)
-
+        .sort_values(
+            ascending=False
+        )
     )
 
-
-    missing = missing[missing > 0]
-
+    missing = missing[
+        missing > 0
+    ]
 
     st.dataframe(
-        missing.to_frame("Missing Values"),
+        missing.to_frame(
+            "Missing Values"
+        ),
         use_container_width=True
     )
 
-
-    st.subheader("Sale Price Distribution")
-
+    st.subheader(
+        "Sale Price Distribution"
+    )
 
     st.bar_chart(
-        df["SalePrice"]
-        .value_counts(bins=30)
-        .sort_index()
+        df["SalePrice"].value_counts(
+            bins=30
+        ).sort_index()
     )
 
 
@@ -884,7 +814,6 @@ elif page == "About Project":
 
     st.title("ℹ️ About This Project")
 
-
     st.markdown(
         """
         ### Project Goal
@@ -892,7 +821,7 @@ elif page == "About Project":
         Build an end-to-end machine learning system
         capable of predicting house prices.
 
-        ### Machine Learning Techniques
+        ### Machine Learning Models
 
         - Linear Regression
         - Ridge Regression
@@ -905,7 +834,6 @@ elif page == "About Project":
 
         - Missing value treatment
         - Feature engineering
-        - Numerical scaling
         - One-hot encoding
         - Train/test split
 
@@ -918,7 +846,8 @@ elif page == "About Project":
 
         ### Deployment
 
-        The final model is deployed using Streamlit.
+        The final XGBoost model is deployed using
+        Streamlit.
 
         ### Author
 
@@ -928,3 +857,4 @@ elif page == "About Project":
         Data Scientist
         """
     )
+
