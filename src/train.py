@@ -1,302 +1,167 @@
-import pandas as pd
-import numpy as np
-from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import (LinearRegression, Lasso, Ridge, ElasticNet)
-from sklearn.ensemble import RandomForestRegressor
-from xgboost import XGBRegressor
-from sklearn.model_selection import (train_test_split, cross_val_score, GridSearchCV)
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import(OneHotEncoder, StandardScaler)
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import (r2_score, mean_absolute_error, root_mean_squared_error)
-from preprocessing import feat_gengeenering, wrangle
-import pickle
+import os
 import json
 
-# ======================================================
-## load data
-# ======================================================
-df = pd.read_csv('../data/train.csv')
+import pandas as pd
+import numpy as np
 
-# ======================================================
-# Clean and engineer data 
-# ======================================================
-df = feat_gengeenering(
-    wrangle(df)
-    )
-
-# ======================================================
-# Spliting Data
-# ======================================================
-X = df.drop(
-    columns = [
-        'SalePrice',
-        'LogSalePrice',
-        'Id'
-    ]
+from sklearn.model_selection import (
+    train_test_split,
+    cross_val_score,
+    GridSearchCV
 )
-y = df['LogSalePrice']
 
-# ====================== Train/Test Split ================================
+from sklearn.metrics import (
+    r2_score,
+    mean_absolute_error,
+    root_mean_squared_error
+)
+
+from xgboost import XGBRegressor
+
+from preprocessing import (
+    wrangle,
+    feat_gengeenering,
+    prepare_features
+)
+
+
+# ============================================================
+# CREATE DIRECTORIES
+# ============================================================
+
+os.makedirs("../models", exist_ok=True)
+os.makedirs("../results", exist_ok=True)
+
+
+# ============================================================
+# LOAD DATA
+# ============================================================
+
+print("Loading dataset...")
+
+df = pd.read_csv(
+    "../data/train.csv"
+)
+
+print("Dataset shape:", df.shape)
+
+
+# ============================================================
+# CLEAN DATA
+# ============================================================
+
+print("\nCleaning data...")
+
+df = wrangle(df)
+
+
+# ============================================================
+# FEATURE ENGINEERING
+# ============================================================
+
+print("Creating features...")
+
+df = feat_gengeenering(df)
+
+
+# ============================================================
+# TARGET
+# ============================================================
+
+X = prepare_features(df)
+
+y = df["LogSalePrice"]
+
+
+print("\nFinal feature shape:", X.shape)
+
+
+# ============================================================
+# TRAIN / TEST SPLIT
+# ============================================================
+
 X_train, X_test, y_train, y_test = train_test_split(
+
     X,
     y,
+
     test_size=0.2,
+
     random_state=42
 )
 
-# =======================================================================
-# preprocesing
-# =======================================================================
-numeric_features = X_train.select_dtypes(
-    include=["int64", "float64"]
-).columns.tolist()
 
-categorical_features = X_train.select_dtypes(
-    include=["object"]
-).columns.tolist()
+print("\nTraining:", X_train.shape)
+print("Testing :", X_test.shape)
 
-numeric_pipeline = Pipeline(
-    [
-        ('imputer', SimpleImputer(strategy="median")),
-        ('scaler', StandardScaler())
-    ]
-)
-
-categorical_pipeline = Pipeline(
-    [
-        ('imputer', SimpleImputer(strategy="most_frequent")),
-        ('encoder', OneHotEncoder(handle_unknown='ignore'))
-    ]
-
-)
-
-preprocessor = ColumnTransformer(
-    [
-        ('numeric', numeric_pipeline, numeric_features),
-        ('categorical', categorical_pipeline, categorical_features)
-    ]
-)
 
 # ============================================================
-# models
+# XGBOOST
 # ============================================================
 
-models = {
+xgb_model = XGBRegressor(
 
-    "Linear Regression": LinearRegression(),
+    objective="reg:squarederror",
 
-    "Ridge": Ridge(alpha=1.0),
+    random_state=42,
 
-    "Lasso": Lasso(alpha=0.001),
-
-    "ElasticNet": ElasticNet(
-        alpha=0.001,
-        l1_ratio=0.5
-    ),
-
-    "Random Forest": RandomForestRegressor(
-        n_estimators=300,
-        max_depth=None,
-        random_state=42,
-        n_jobs=-1
-    ),
-
-    "XGBoost": XGBRegressor(
-        n_estimators=500,
-        learning_rate=0.05,
-        max_depth=4,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-        objective="reg:squarederror"
-    )
-}
-
-# ============================================================
-# train and evaluate models
-# ============================================================
-
-results = []
-
-trained_models = {}
-
-
-for name, model in models.items():
-
-    print("\n" + "=" * 60)
-
-    print(f"Training {name}...")
-
-    pipeline = Pipeline(
-        steps=[
-            (
-                "preprocessor",
-                preprocessor
-            ),
-            (
-                "model",
-                model
-            )
-        ]
-    )
-
-    pipeline.fit(
-        X_train,
-        y_train
-    )
-
-    # Predictions
-    train_predictions = pipeline.predict(
-        X_train
-    )
-
-    test_predictions = pipeline.predict(
-        X_test
-    )
-
-    # Metrics
-    train_r2 = r2_score(
-        y_train,
-        train_predictions
-    )
-
-    test_r2 = r2_score(
-        y_test,
-        test_predictions
-    )
-
-    train_mae = mean_absolute_error(
-        y_train,
-        train_predictions
-    )
-
-    test_mae = mean_absolute_error(
-        y_test,
-        test_predictions
-    )
-
-    train_rmse = root_mean_squared_error(
-        y_train,
-        train_predictions
-    )
-
-    test_rmse = root_mean_squared_error(
-        y_test,
-        test_predictions
-    )
-
-    results.append(
-        {
-            "Model": name,
-
-            "Train_R2": train_r2,
-            "Test_R2": test_r2,
-
-            "Train_MAE": train_mae,
-            "Test_MAE": test_mae,
-
-            "Train_RMSE": train_rmse,
-            "Test_RMSE": test_rmse
-        }
-    )
-
-    trained_models[name] = pipeline
-
-    print(f"Train R² : {train_r2:.4f}")
-    print(f"Test R²  : {test_r2:.4f}")
-
-    print(f"Train MAE: {train_mae:.4f}")
-    print(f"Test MAE : {test_mae:.4f}")
-
-    print(f"Train RMSE: {train_rmse:.4f}")
-    print(f"Test RMSE : {test_rmse:.4f}")
-
-
-
-# ====================== saving evaluation results
-results_df = pd.DataFrame(results)
-
-results_df = results_df.sort_values(
-    by ='Test_R2',
-    ascending=False
-)
-results_df.to_csv('../results/model_comparison.csv', index=False)
-
-
-best_model_name = results_df.iloc[0]['Model']
-best_pipeline = trained_models[best_model_name]
-
-cv_scores = cross_val_score(
-    best_pipeline,
-    X_train,
-    y_train,
-    cv=5,
-    scoring='r2',
     n_jobs=-1
 )
 
-print(f' {cv_scores.mean():.4f} ')
-print(f'{cv_scores.std():.4f}')
 
-
-
-print("\n")
-print("=" * 70)
-print("XGBOOST HYPERPARAMETER TUNING")
-print("=" * 70)
-
-
-xgb_pipeline = Pipeline(
-    steps=[
-        (
-            "preprocessor",
-            preprocessor
-        ),
-        (
-            "model",
-            XGBRegressor(
-                objective="reg:squarederror",
-                random_state=42,
-                n_jobs=-1
-            )
-        )
-    ]
-)
-
+# ============================================================
+# PARAMETER GRID
+# ============================================================
 
 param_grid = {
 
-    "model__n_estimators": [
+    "n_estimators": [
         300,
         500
     ],
 
-    "model__max_depth": [
+    "max_depth": [
         3,
         4,
         5
     ],
 
-    "model__learning_rate": [
+    "learning_rate": [
         0.03,
         0.05,
         0.1
     ],
 
-    "model__subsample": [
+    "subsample": [
+        0.8,
+        1.0
+    ],
+
+    "colsample_bytree": [
         0.8,
         1.0
     ]
 }
 
 
+# ============================================================
+# GRID SEARCH
+# ============================================================
+
+print("\nStarting XGBoost tuning...")
+
 grid_search = GridSearchCV(
-    estimator=xgb_pipeline,
+
+    estimator=xgb_model,
+
     param_grid=param_grid,
+
     cv=3,
+
     scoring="r2",
+
     n_jobs=-1,
+
     verbose=1
 )
 
@@ -307,103 +172,155 @@ grid_search.fit(
 )
 
 
-print("\nBest XGBoost parameters:")
+# ============================================================
+# BEST MODEL
+# ============================================================
+
+best_model = grid_search.best_estimator_
+
+
+print("\nBest parameters:")
 
 print(
     grid_search.best_params_
 )
 
+
 print(
-    f"Best CV R²: "
+    f"\nBest CV R²: "
     f"{grid_search.best_score_:.4f}"
 )
 
 
 # ============================================================
-# EVALUATE TUNED XGBOOST
+# CROSS VALIDATION
 # ============================================================
 
-tuned_xgb = grid_search.best_estimator_
+cv_scores = cross_val_score(
+
+    best_model,
+
+    X_train,
+
+    y_train,
+
+    cv=5,
+
+    scoring="r2",
+
+    n_jobs=-1
+)
 
 
-tuned_train_predictions = tuned_xgb.predict(
+print("\nCross-validation scores:")
+
+print(cv_scores)
+
+print(
+    f"Mean CV R²: "
+    f"{cv_scores.mean():.4f}"
+)
+
+print(
+    f"CV Std: "
+    f"{cv_scores.std():.4f}"
+)
+
+
+# ============================================================
+# PREDICTIONS
+# ============================================================
+
+train_predictions = best_model.predict(
     X_train
 )
 
-tuned_test_predictions = tuned_xgb.predict(
+test_predictions = best_model.predict(
     X_test
 )
 
 
-tuned_train_r2 = r2_score(
+# ============================================================
+# METRICS
+# ============================================================
+
+training_r2 = r2_score(
     y_train,
-    tuned_train_predictions
+    train_predictions
 )
 
-tuned_test_r2 = r2_score(
+testing_r2 = r2_score(
     y_test,
-    tuned_test_predictions
+    test_predictions
 )
 
-tuned_train_mae = mean_absolute_error(
+
+training_mae = mean_absolute_error(
     y_train,
-    tuned_train_predictions
+    train_predictions
 )
 
-tuned_test_mae = mean_absolute_error(
+testing_mae = mean_absolute_error(
     y_test,
-    tuned_test_predictions
+    test_predictions
 )
 
-tuned_train_rmse = root_mean_squared_error(
+
+training_rmse = root_mean_squared_error(
     y_train,
-    tuned_train_predictions
+    train_predictions
 )
 
-tuned_test_rmse = root_mean_squared_error(
+testing_rmse = root_mean_squared_error(
     y_test,
-    tuned_test_predictions
+    test_predictions
 )
 
 
-print("\nTUNED XGBOOST PERFORMANCE")
+print("\nMODEL PERFORMANCE")
 
 print(
-    f"Training R²: {tuned_train_r2:.4f}"
+    f"Training R²: {training_r2:.4f}"
 )
 
 print(
-    f"Testing R²: {tuned_test_r2:.4f}"
+    f"Testing R²: {testing_r2:.4f}"
 )
 
 print(
-    f"Training MAE: {tuned_train_mae:.4f}"
+    f"Training MAE: {training_mae:.4f}"
 )
 
 print(
-    f"Testing MAE: {tuned_test_mae:.4f}"
+    f"Testing MAE: {testing_mae:.4f}"
 )
 
 print(
-    f"Training RMSE: {tuned_train_rmse:.4f}"
+    f"Training RMSE: {training_rmse:.4f}"
 )
 
 print(
-    f"Testing RMSE: {tuned_test_rmse:.4f}"
+    f"Testing RMSE: {testing_rmse:.4f}"
 )
 
 
 # ============================================================
-# 16. SAVE FINAL MODEL
+# SAVE XGBOOST MODEL
 # ============================================================
 
-model_path = "../models/house_price_model.pkl"
+model_path = (
+    "../models/house_price_model.json"
+)
 
-with open(model_path, "wb") as file:
-    pickle.dump(tuned_xgb, file)
+
+best_model.save_model(
+    model_path
+)
 
 
-print("\nModel saved successfully!")
+print(
+    "\nModel saved successfully!"
+)
 
 print(
     f"Location: {model_path}"
@@ -411,32 +328,42 @@ print(
 
 
 # ============================================================
-# SAVE METRICS
+# SAVE FEATURE COLUMNS INSIDE METRICS
 # ============================================================
 
 metrics = {
 
     "model": "Tuned XGBoost",
 
-    "training_r2": tuned_train_r2,
+    "training_r2": training_r2,
 
-    "testing_r2": tuned_test_r2,
+    "testing_r2": testing_r2,
 
-    "training_mae": tuned_train_mae,
+    "training_mae": training_mae,
 
-    "testing_mae": tuned_test_mae,
+    "testing_mae": testing_mae,
 
-    "training_rmse": tuned_train_rmse,
+    "training_rmse": training_rmse,
 
-    "testing_rmse": tuned_test_rmse,
+    "testing_rmse": testing_rmse,
 
     "cross_validation_r2_mean":
-        grid_search.best_score_,
+        cv_scores.mean(),
+
+    "cross_validation_r2_std":
+        cv_scores.std(),
 
     "best_parameters":
-        grid_search.best_params_
+        grid_search.best_params_,
+
+    "feature_columns":
+        X.columns.tolist()
 }
 
+
+# ============================================================
+# SAVE METRICS
+# ============================================================
 
 with open(
     "../results/metrics.json",
@@ -454,4 +381,4 @@ print(
     "Metrics saved successfully!"
 )
 
-print("\nTraining pipeline completed.")
+print("\nTraining completed.")

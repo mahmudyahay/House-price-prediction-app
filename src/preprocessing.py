@@ -2,180 +2,235 @@ import numpy as np
 import pandas as pd
 
 
+# ============================================================
+# CLEAN DATA
+# ============================================================
+
 def wrangle(df):
-    """
-    Clean the Ames Housing dataset and create additional features.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Raw Ames Housing dataset.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Cleaned and feature-engineered dataset.
-    """
-    print('=' * 70)
-    print('Start Cleaning')
-    print('=' * 70)
 
     df = df.copy()
 
+    # Categorical missing values
+    none_cols = [
+        "PoolQC",
+        "MiscFeature",
+        "Alley",
+        "Fence",
+        "MasVnrType",
+        "FireplaceQu",
+        "GarageType",
+        "GarageCond",
+        "GarageQual",
+        "GarageFinish",
+        "BsmtFinType2",
+        "BsmtExposure",
+        "BsmtFinType1",
+        "BsmtQual",
+        "BsmtCond"
+    ]
 
-    # ====================================================
-    # 1. Handling Missing Values for Categorical Features
-    # ====================================================
-    none_cols = ['PoolQC',
-        'MiscFeature',
-        'Alley',
-        'Fence',
-        'MasVnrType',
-        'FireplaceQu',
-        'GarageType',
-        'GarageCond',
-        'GarageQual',
-        'GarageFinish',
-        'BsmtFinType2',
-        'BsmtExposure',
-        'BsmtFinType1',
-        'BsmtQual',
-        'BsmtCond',
-        ]
     for col in none_cols:
+
         if col in df.columns:
-            df[col] = df[col].fillna('None')
+
+            df[col] = df[col].fillna("None")
 
 
-    # ================================================
-    # Filling 'Electrical' with Mode
-    # due to only one missing value
-    # ================================================
-    df['Electrical'] = df['Electrical'].fillna(df['Electrical'].mode()[0])
+    # Numerical missing values
+    zero_cols = [
+        "GarageYrBlt",
+        "GarageArea",
+        "GarageCars",
+        "BsmtFinSF1",
+        "BsmtFinSF2",
+        "BsmtUnfSF",
+        "TotalBsmtSF",
+        "BsmtFullBath",
+        "BsmtHalfBath"
+    ]
 
-    
+    for col in zero_cols:
 
-    # ====================================================
-    # Filling LotFrontage with Neighborhood group median
-    # ====================================================
-    df['LotFrontage'] = (
-    df.groupby('Neighborhood')['LotFrontage']
-    .transform(lambda x: x.fillna(x.median()))
-    )
+        if col in df.columns:
 
-    # ===================================================================
-    # Cleaning MasVnrArea but with style, 
-    # any house that dont have MasVnrType should have 0 as MasVnrArea 
-    # then fill real missing ones with median
-    # ===================================================================
+            df[col] = df[col].fillna(0)
 
-    df['MasVnrArea'] = np.where(df['MasVnrType']== 'None', 0, df['MasVnrArea'])
 
-    df['MasVnrArea'] = df["MasVnrArea"].fillna(df['MasVnrArea'].median())
+    # Electrical
+    if "Electrical" in df.columns:
 
-    print('=' * 70)
-    print('Finished Cleaning')
-    print('=' * 70)
+        df["Electrical"] = df["Electrical"].fillna(
+            df["Electrical"].mode()[0]
+        )
+
+
+    # LotFrontage
+    if "LotFrontage" in df.columns:
+
+        df["LotFrontage"] = (
+            df.groupby("Neighborhood")["LotFrontage"]
+            .transform(
+                lambda x: x.fillna(x.median())
+            )
+        )
+
+        df["LotFrontage"] = df["LotFrontage"].fillna(
+            df["LotFrontage"].median()
+        )
+
+
+    # MasVnrArea
+    if "MasVnrArea" in df.columns:
+
+        df["MasVnrArea"] = np.where(
+            df["MasVnrType"] == "None",
+            0,
+            df["MasVnrArea"]
+        )
+
+        df["MasVnrArea"] = df["MasVnrArea"].fillna(
+            df["MasVnrArea"].median()
+        )
+
+
+    # Other categorical columns
+    mode_cols = [
+        "MSZoning",
+        "Utilities",
+        "Functional",
+        "SaleType",
+        "KitchenQual",
+        "Exterior1st",
+        "Exterior2nd"
+    ]
+
+    for col in mode_cols:
+
+        if col in df.columns:
+
+            if not df[col].mode().empty:
+
+                df[col] = df[col].fillna(
+                    df[col].mode()[0]
+                )
+
 
     return df
 
-def feat_gengeenering(clean_df):
-    """
-    A Function that takes in a clean dataframe and do some feature engineering 
-    
-    Parameters:
-        dataframe (pd.DataFrame): A clean dataframe from our wrangle function.
 
-    Returns:
-        dataframe (pd.DataFrame): An engineered DataFrame
+# ============================================================
+# FEATURE ENGINEERING
+# ============================================================
 
-    Examples:
-    >>> feat_gengeenering(clean_df)
-    df
+def feat_gengeenering(df):
 
-    """
-    print('=' * 70)
-    print('Start Engineering')
-    print('=' * 70)
+    df = df.copy()
 
-    df = clean_df.copy()
+    current_year = 2026
 
-    # ==================================================================
-    # Engineer HouseAge by Subtracting "YearBuilt" from max "YearBuilt" 
-    # ===================================================================
 
-    current_year = df["YearBuilt"].max()
-    df['HouseAge'] = (
-    current_year - df["YearBuilt"]
+    df["HouseAge"] = (
+        current_year - df["YearBuilt"]
     )
 
+
     df["TotalPorchSF"] = (
-            df["OpenPorchSF"]
-            + df["3SsnPorch"]
-            + df["EnclosedPorch"]
-            + df["ScreenPorch"]
-            + df["WoodDeckSF"]
-        )
-    
+        df["OpenPorchSF"]
+        + df["3SsnPorch"]
+        + df["EnclosedPorch"]
+        + df["ScreenPorch"]
+        + df["WoodDeckSF"]
+    )
+
+
     df["TotalSF"] = (
-            df["GrLivArea"] + df["TotalBsmtSF"]
-        )
+        df["GrLivArea"]
+        + df["TotalBsmtSF"]
+    )
+
 
     df["YearsSinceRemodel"] = (
-            df["YearRemodAdd"] - df["YearBuilt"]
-        )
+        df["YearRemodAdd"]
+        - df["YearBuilt"]
+    )
+
 
     df["IsRemodeled"] = (
-            df["YearRemodAdd"] != df["YearBuilt"]
-        ).astype(int)
+        df["YearRemodAdd"]
+        != df["YearBuilt"]
+    ).astype(int)
+
 
     df["HasGarage"] = (
-            df["GarageArea"] > 0
-        ).astype(int)
+        df["GarageArea"] > 0
+    ).astype(int)
+
 
     df["HasFireplace"] = (
         df["Fireplaces"] > 0
     ).astype(int)
 
+
     df["HasPool"] = (
-            df["PoolArea"] > 0
-        ).astype(int)
+        df["PoolArea"] > 0
+    ).astype(int)
+
 
     df["HasBasement"] = (
-            df["TotalBsmtSF"] > 0
-        ).astype(int)
+        df["TotalBsmtSF"] > 0
+    ).astype(int)
+
 
     df["TotalBathrooms"] = (
-            df["FullBath"]
-            + 0.5 * df["HalfBath"]
-        )
+        df["FullBath"]
+        + 0.5 * df["HalfBath"]
+    )
+
 
     df["GarageSpacePerCar"] = np.where(
-            df["GarageCars"] > 0,
-            df["GarageArea"] / df["GarageCars"],
-            0
-        )
+        df["GarageCars"] > 0,
+        df["GarageArea"] / df["GarageCars"],
+        0
+    )
 
-    # =================================================================
-    # Log-transform SalePrice to be our target
-    # ==================================================================
 
+    # Target
     if "SalePrice" in df.columns:
 
         df["LogSalePrice"] = np.log1p(
             df["SalePrice"]
         )
-    print('=' * 70)
-    print('Finished Engineering')
-    print('=' * 70)
+
+
     return df
 
 
-# ====================================================
-# testing preprocessing 
-# ====================================================
+# ============================================================
+# FINAL PREPROCESSING FOR XGBOOST
+# ============================================================
 
-df = pd.read_csv('../data/train.csv')
-df = feat_gengeenering(wrangle(df))
+def prepare_features(df):
 
+    df = df.copy()
 
+    # Remove target columns
+    df = df.drop(
+        columns=[
+            "SalePrice",
+            "LogSalePrice",
+            "Id"
+        ],
+        errors="ignore"
+    )
+
+    # Convert categorical columns to numerical
+    df = pd.get_dummies(
+        df,
+        drop_first=False,
+        dtype=float
+    )
+
+    # Fill anything remaining
+    df = df.fillna(0)
+
+    return df
