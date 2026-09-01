@@ -7,6 +7,7 @@ import pandas as pd
 
 from sklearn.model_selection import (
     train_test_split,
+    cross_val_score,
     GridSearchCV
 )
 
@@ -45,33 +46,35 @@ from preprocessing import (
 
 
 # ============================================================
-# DIRECTORIES
+# 1. CREATE DIRECTORIES
 # ============================================================
 
-os.makedirs("../models", exist_ok=True)
-os.makedirs("../results", exist_ok=True)
+os.makedirs("models", exist_ok=True)
+os.makedirs("results", exist_ok=True)
 
 
 # ============================================================
-# LOAD DATA
+# 2. LOAD DATA
 # ============================================================
 
 print("Loading dataset...")
 
 df = pd.read_csv("../data/train.csv")
 
-
-# ============================================================
-# PREPROCESSING
-# ============================================================
-
-df = feat_gengeenering(
-    wrangle(df)
-)
+print("Dataset shape:", df.shape)
 
 
 # ============================================================
-# X AND y
+# 3. CLEAN + FEATURE ENGINEERING
+# ============================================================
+
+df = wrangle(df)
+
+df = feat_gengeenering(df)
+
+
+# ============================================================
+# 4. X AND Y
 # ============================================================
 
 X = df.drop(
@@ -79,14 +82,15 @@ X = df.drop(
         "SalePrice",
         "LogSalePrice",
         "Id"
-    ]
+    ],
+    errors="ignore"
 )
 
 y = df["LogSalePrice"]
 
 
 # ============================================================
-# TRAIN TEST SPLIT
+# 5. TRAIN / TEST SPLIT
 # ============================================================
 
 X_train, X_test, y_train, y_test = train_test_split(
@@ -98,7 +102,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 
 # ============================================================
-# FEATURES
+# 6. IDENTIFY FEATURES
 # ============================================================
 
 numeric_features = X_train.select_dtypes(
@@ -110,12 +114,23 @@ categorical_features = X_train.select_dtypes(
 ).columns.tolist()
 
 
+print(
+    "Numeric features:",
+    len(numeric_features)
+)
+
+print(
+    "Categorical features:",
+    len(categorical_features)
+)
+
+
 # ============================================================
-# NUMERIC PIPELINE
+# 7. NUMERIC PIPELINE
 # ============================================================
 
 numeric_pipeline = Pipeline(
-    [
+    steps=[
         (
             "imputer",
             SimpleImputer(strategy="median")
@@ -129,11 +144,11 @@ numeric_pipeline = Pipeline(
 
 
 # ============================================================
-# CATEGORICAL PIPELINE
+# 8. CATEGORICAL PIPELINE
 # ============================================================
 
 categorical_pipeline = Pipeline(
-    [
+    steps=[
         (
             "imputer",
             SimpleImputer(strategy="most_frequent")
@@ -149,11 +164,11 @@ categorical_pipeline = Pipeline(
 
 
 # ============================================================
-# PREPROCESSOR
+# 9. PREPROCESSOR
 # ============================================================
 
 preprocessor = ColumnTransformer(
-    [
+    transformers=[
         (
             "numeric",
             numeric_pipeline,
@@ -169,11 +184,220 @@ preprocessor = ColumnTransformer(
 
 
 # ============================================================
-# XGBOOST
+# 10. MODELS
 # ============================================================
 
+models = {
+
+    "Linear Regression":
+        LinearRegression(),
+
+    "Ridge":
+        Ridge(alpha=1.0),
+
+    "Lasso":
+        Lasso(alpha=0.001),
+
+    "ElasticNet":
+        ElasticNet(
+            alpha=0.001,
+            l1_ratio=0.5
+        ),
+
+    "Random Forest":
+        RandomForestRegressor(
+            n_estimators=300,
+            max_depth=None,
+            random_state=42,
+            n_jobs=-1
+        ),
+
+    "XGBoost":
+        XGBRegressor(
+            n_estimators=500,
+            learning_rate=0.05,
+            max_depth=4,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            objective="reg:squarederror"
+        )
+}
+
+
+# ============================================================
+# 11. TRAIN MODELS
+# ============================================================
+
+results = []
+
+trained_models = {}
+
+
+for name, model in models.items():
+
+    print("\n" + "=" * 60)
+
+    print("Training:", name)
+
+    pipeline = Pipeline(
+        steps=[
+            (
+                "preprocessor",
+                preprocessor
+            ),
+            (
+                "model",
+                model
+            )
+        ]
+    )
+
+    pipeline.fit(
+        X_train,
+        y_train
+    )
+
+    # Predictions
+    train_predictions = pipeline.predict(
+        X_train
+    )
+
+    test_predictions = pipeline.predict(
+        X_test
+    )
+
+    # R²
+    train_r2 = r2_score(
+        y_train,
+        train_predictions
+    )
+
+    test_r2 = r2_score(
+        y_test,
+        test_predictions
+    )
+
+    # MAE
+    train_mae = mean_absolute_error(
+        y_train,
+        train_predictions
+    )
+
+    test_mae = mean_absolute_error(
+        y_test,
+        test_predictions
+    )
+
+    # RMSE
+    train_rmse = root_mean_squared_error(
+        y_train,
+        train_predictions
+    )
+
+    test_rmse = root_mean_squared_error(
+        y_test,
+        test_predictions
+    )
+
+    results.append(
+        {
+            "Model": name,
+            "Train_R2": train_r2,
+            "Test_R2": test_r2,
+            "Train_MAE": train_mae,
+            "Test_MAE": test_mae,
+            "Train_RMSE": train_rmse,
+            "Test_RMSE": test_rmse
+        }
+    )
+
+    trained_models[name] = pipeline
+
+    print(
+        f"Train R²: {train_r2:.4f}"
+    )
+
+    print(
+        f"Test R²: {test_r2:.4f}"
+    )
+
+
+# ============================================================
+# 12. MODEL COMPARISON
+# ============================================================
+
+results_df = pd.DataFrame(results)
+
+results_df = results_df.sort_values(
+    by="Test_R2",
+    ascending=False
+)
+
+print("\nMODEL COMPARISON")
+
+print(
+    results_df.to_string(index=False)
+)
+
+
+results_df.to_csv(
+    "results/model_comparison.csv",
+    index=False
+)
+
+
+# ============================================================
+# 13. CROSS VALIDATION
+# ============================================================
+
+best_model_name = (
+    results_df.iloc[0]["Model"]
+)
+
+best_pipeline = (
+    trained_models[best_model_name]
+)
+
+
+cv_scores = cross_val_score(
+    best_pipeline,
+    X_train,
+    y_train,
+    cv=5,
+    scoring="r2",
+    n_jobs=-1
+)
+
+cv_mean = cv_scores.mean()
+cv_std = cv_scores.std()
+
+
+print("\nCROSS VALIDATION")
+
+print(
+    "Scores:",
+    cv_scores
+)
+
+print(
+    f"Mean CV R²: {cv_mean:.4f}"
+)
+
+print(
+    f"CV Std: {cv_std:.4f}"
+)
+
+
+# ============================================================
+# 14. XGBOOST TUNING
+# ============================================================
+
+print("\nXGBOOST HYPERPARAMETER TUNING")
+
+
 xgb_pipeline = Pipeline(
-    [
+    steps=[
         (
             "preprocessor",
             preprocessor
@@ -189,10 +413,6 @@ xgb_pipeline = Pipeline(
     ]
 )
 
-
-# ============================================================
-# PARAMETERS TO TEST
-# ============================================================
 
 param_grid = {
 
@@ -220,10 +440,6 @@ param_grid = {
 }
 
 
-# ============================================================
-# GRID SEARCH
-# ============================================================
-
 grid_search = GridSearchCV(
     estimator=xgb_pipeline,
     param_grid=param_grid,
@@ -234,23 +450,17 @@ grid_search = GridSearchCV(
 )
 
 
-print("Training XGBoost...")
-
 grid_search.fit(
     X_train,
     y_train
 )
 
 
-# ============================================================
-# BEST MODEL
-# ============================================================
+print("\nBest XGBoost parameters:")
 
-model = grid_search.best_estimator_
-
-
-print("\nBest parameters:")
-print(grid_search.best_params_)
+print(
+    grid_search.best_params_
+)
 
 print(
     f"Best CV R²: "
@@ -259,85 +469,64 @@ print(
 
 
 # ============================================================
-# PREDICTIONS
+# 15. TUNED XGBOOST
 # ============================================================
 
-train_predictions = model.predict(
-    X_train
-)
-
-test_predictions = model.predict(
-    X_test
+tuned_xgb = (
+    grid_search.best_estimator_
 )
 
 
-# ============================================================
-# METRICS
-# ============================================================
+tuned_train_predictions = (
+    tuned_xgb.predict(X_train)
+)
 
-training_r2 = r2_score(
+tuned_test_predictions = (
+    tuned_xgb.predict(X_test)
+)
+
+
+tuned_train_r2 = r2_score(
     y_train,
-    train_predictions
+    tuned_train_predictions
 )
 
-testing_r2 = r2_score(
+tuned_test_r2 = r2_score(
     y_test,
-    test_predictions
+    tuned_test_predictions
 )
 
-training_mae = mean_absolute_error(
+
+tuned_train_mae = mean_absolute_error(
     y_train,
-    train_predictions
+    tuned_train_predictions
 )
 
-testing_mae = mean_absolute_error(
+tuned_test_mae = mean_absolute_error(
     y_test,
-    test_predictions
+    tuned_test_predictions
 )
 
-training_rmse = root_mean_squared_error(
+
+tuned_train_rmse = root_mean_squared_error(
     y_train,
-    train_predictions
+    tuned_train_predictions
 )
 
-testing_rmse = root_mean_squared_error(
+tuned_test_rmse = root_mean_squared_error(
     y_test,
-    test_predictions
-)
-
-
-print("\nMODEL PERFORMANCE")
-
-print(
-    f"Training R²: {training_r2:.4f}"
-)
-
-print(
-    f"Testing R²: {testing_r2:.4f}"
-)
-
-print(
-    f"Training MAE: {training_mae:.4f}"
-)
-
-print(
-    f"Testing MAE: {testing_mae:.4f}"
-)
-
-print(
-    f"Training RMSE: {training_rmse:.4f}"
-)
-
-print(
-    f"Testing RMSE: {testing_rmse:.4f}"
+    tuned_test_predictions
 )
 
 
 # ============================================================
-# SAVE MODEL
+# 16. SAVE MODEL
 # ============================================================
 
-model_path = "../models/house_price_model.pkl"
+model_path = (
+    "models/house_price_model.pkl"
+)
+
 
 with open(
     model_path,
@@ -345,37 +534,44 @@ with open(
 ) as file:
 
     pickle.dump(
-        model,
+        tuned_xgb,
         file
     )
 
 
-print(
-    "\nModel saved:"
-)
+print("\nModel saved successfully!")
 
-print(model_path)
+print(
+    "Location:",
+    model_path
+)
 
 
 # ============================================================
-# SAVE METRICS
+# 17. SAVE METRICS
 # ============================================================
 
 metrics = {
 
     "model": "Tuned XGBoost",
 
-    "training_r2": training_r2,
+    "training_r2":
+        tuned_train_r2,
 
-    "testing_r2": testing_r2,
+    "testing_r2":
+        tuned_test_r2,
 
-    "training_mae": training_mae,
+    "training_mae":
+        tuned_train_mae,
 
-    "testing_mae": testing_mae,
+    "testing_mae":
+        tuned_test_mae,
 
-    "training_rmse": training_rmse,
+    "training_rmse":
+        tuned_train_rmse,
 
-    "testing_rmse": testing_rmse,
+    "testing_rmse":
+        tuned_test_rmse,
 
     "cross_validation_r2_mean":
         grid_search.best_score_,
@@ -386,7 +582,7 @@ metrics = {
 
 
 with open(
-    "../results/metrics.json",
+    "results/metrics.json",
     "w"
 ) as file:
 
@@ -398,7 +594,7 @@ with open(
 
 
 print(
-    "Metrics saved successfully."
+    "Metrics saved successfully!"
 )
 
 print("\nTraining completed.")

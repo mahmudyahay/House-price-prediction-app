@@ -9,7 +9,7 @@ def wrangle(df):
 
     df = df.copy()
 
-    # Categorical columns where NaN means feature does not exist
+    # Categorical columns where missing means the feature does not exist
     none_cols = [
         "PoolQC",
         "MiscFeature",
@@ -49,15 +49,14 @@ def wrangle(df):
             df["LotFrontage"].median()
         )
 
-    # Masonry veneer
+    # MasVnrArea
     if "MasVnrArea" in df.columns:
 
-        if "MasVnrType" in df.columns:
-            df["MasVnrArea"] = np.where(
-                df["MasVnrType"] == "None",
-                0,
-                df["MasVnrArea"]
-            )
+        df["MasVnrArea"] = np.where(
+            df["MasVnrType"] == "None",
+            0,
+            df["MasVnrArea"]
+        )
 
         df["MasVnrArea"] = df["MasVnrArea"].fillna(
             df["MasVnrArea"].median()
@@ -73,14 +72,14 @@ def feat_gengeenering(df):
 
     df = df.copy()
 
-    # House age
-    current_year = df["YearBuilt"].max()
+    # Use a fixed reference year so training and prediction
+    # use the same logic.
+    current_year = 2010
 
     df["HouseAge"] = (
         current_year - df["YearBuilt"]
     )
 
-    # Porch area
     df["TotalPorchSF"] = (
         df["OpenPorchSF"]
         + df["3SsnPorch"]
@@ -89,57 +88,48 @@ def feat_gengeenering(df):
         + df["WoodDeckSF"]
     )
 
-    # Total area
     df["TotalSF"] = (
         df["GrLivArea"]
         + df["TotalBsmtSF"]
     )
 
-    # Remodeling
     df["YearsSinceRemodel"] = (
         df["YearRemodAdd"]
         - df["YearBuilt"]
     )
 
     df["IsRemodeled"] = (
-        df["YearRemodAdd"]
-        != df["YearBuilt"]
+        df["YearRemodAdd"] != df["YearBuilt"]
     ).astype(int)
 
-    # Garage
     df["HasGarage"] = (
         df["GarageArea"] > 0
     ).astype(int)
 
-    # Fireplace
     df["HasFireplace"] = (
         df["Fireplaces"] > 0
     ).astype(int)
 
-    # Pool
     df["HasPool"] = (
         df["PoolArea"] > 0
     ).astype(int)
 
-    # Basement
     df["HasBasement"] = (
         df["TotalBsmtSF"] > 0
     ).astype(int)
 
-    # Bathrooms
     df["TotalBathrooms"] = (
         df["FullBath"]
         + 0.5 * df["HalfBath"]
     )
 
-    # Garage space
     df["GarageSpacePerCar"] = np.where(
         df["GarageCars"] > 0,
         df["GarageArea"] / df["GarageCars"],
         0
     )
 
-    # Target
+    # Target transformation only when SalePrice exists
     if "SalePrice" in df.columns:
 
         df["LogSalePrice"] = np.log1p(
