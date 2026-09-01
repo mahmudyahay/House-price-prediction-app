@@ -4,6 +4,9 @@ import pickle
 import numpy as np
 import pandas as pd
 import streamlit as st
+import os
+
+
 
 
 # ============================================================
@@ -17,33 +20,37 @@ st.set_page_config(
 )
 
 
-# ============================================================
-# LOAD MODEL
-# ============================================================
+# load model
+
+
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 @st.cache_resource
 def load_model():
 
-    with open(
-        "models/house_price_model.pkl",
-        "rb"
-    ) as file:
+    model_path = os.path.join(
+        BASE_DIR,
+        "models",
+        "house_price_model.pkl"
+    )
 
+    with open(model_path, "rb") as file:
         return pickle.load(file)
 
-
-# ============================================================
-# LOAD METRICS
-# ============================================================
 
 @st.cache_data
 def load_metrics():
 
-    with open(
-        "results/metrics.json",
-        "r"
-    ) as file:
+    metrics_path = os.path.join(
+        BASE_DIR,
+        "results",
+        "metrics.json"
+    )
 
+    with open(metrics_path, "r") as file:
         return json.load(file)
 
 
