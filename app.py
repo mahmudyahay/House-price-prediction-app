@@ -6,40 +6,18 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from preprocessing import (
-    wrangle,
-    feat_gengeenering
-)
+from src.preprocessing import wrangle, feat_gengeenering
 
 
-# ============================================================
-# PATHS
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-
-MODEL_PATH = (
-    BASE_DIR
-    / "models"
-    / "house_price_model.pkl"
-)
-
-METRICS_PATH = (
-    BASE_DIR
-    / "results"
-    / "metrics.json"
-)
-
-DATA_PATH = (
-    BASE_DIR
-    / "data"
-    / "train.csv"
-)
 
 
-# ============================================================
-# PAGE
-# ============================================================
+
+MODEL_PATH = "models/house_price_model.pkl"
+
+METRICS_PATH = "results/metrics.json"
+
+DATA_PATH = "data/train.csv"
+
 
 st.set_page_config(
     page_title="House Price Prediction",
